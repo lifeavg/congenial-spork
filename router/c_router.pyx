@@ -20,15 +20,12 @@ cdef class Node:
         self.handler = None
 
 
-cdef inline Node empty_node():
-    return Node()
-
 
 cdef class RadixRouter:
     cdef Node root
 
     def __cinit__(self):
-        self.root = empty_node()
+        self.root = Node()
 
     def add(self, str path, object handler):
         if not path:
@@ -42,7 +39,7 @@ cdef class RadixRouter:
 
         cdef list segments = self._split(path)
         cdef Node node = self.root
-        cdef bint wildcard_seen = False
+        cdef bool wildcard_seen = False
         cdef str seg, name
         cdef int i
 
@@ -51,7 +48,6 @@ cdef class RadixRouter:
 
             if "*" in seg and not seg.startswith("*"):
                 raise ValueError(f"Invalid wildcard pattern: {seg}")
-
             if seg.startswith("*"):
                 if wildcard_seen:
                     raise ValueError("Multiple wildcards")
@@ -64,29 +60,23 @@ cdef class RadixRouter:
                 name = seg[1:]
 
                 if node.wildcard is None:
-                    node.wildcard = empty_node()
+                    node.wildcard = Node()
                     node.wildcard_name = name
                 elif node.wildcard_name != name:
                     raise ValueError("Conflicting wildcard names")
-
                 node = node.wildcard
                 break
-
             elif seg.startswith(":"):
                 name = seg[1:]
                 if node.param is None:
-                    node.param = empty_node()
+                    node.param = Node()
                     node.param_name = name
                 elif node.param_name != name:
-                    raise ValueError(
-                        f"Conflicting param names at same position: "
-                        f"{node.param_name} vs {name}"
-                    )
+                    raise ValueError(f"Conflicting param names at same position: {node.param_name} vs {name}")
                 node = node.param
-
             else:
                 if seg not in node.static:
-                    node.static[seg] = empty_node()
+                    node.static[seg] = Node()
                 node = node.static[seg]
 
         if node.handler is not None:

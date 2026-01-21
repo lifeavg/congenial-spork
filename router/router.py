@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 _UNSET = object()
@@ -6,31 +6,20 @@ _UNSET = object()
 
 @dataclass(slots=True)
 class Node:
-    static: dict[str, "Node"]
-    param: Optional["Node"]
-    param_name: Optional[str]
-    wildcard: Optional["Node"]
-    wildcard_name: Optional[str]
-    handler: Any
-
-
-def empty_node() -> Node:
-    return Node(
-        static={},
-        param=None,
-        param_name=None,
-        wildcard=None,
-        wildcard_name=None,
-        handler=None,
-    )
+    static: dict[str, "Node"] = field(default_factory=dict)
+    param: Optional["Node"] = None
+    param_name: Optional[str] = None
+    wildcard: Optional["Node"] = None
+    wildcard_name: Optional[str] = None
+    handler: Any = None
 
 
 class RadixRouter:
     def __init__(self):
-        self.root = empty_node()
+        self.root = Node()
 
     def add(self, path: str, handler: Any):
-        if path == "":
+        if not path:
             raise ValueError("Empty path")
 
         if path == "/":
@@ -58,14 +47,16 @@ class RadixRouter:
                 name = seg[1:]
 
                 if node.wildcard is None:
-                    node.wildcard = empty_node()
+                    node.wildcard = Node()
                     node.wildcard_name = name
+                elif node.wildcard_name != name:
+                    raise ValueError("Conflicting wildcard names")
                 node = node.wildcard
                 break
             elif seg.startswith(":"):
                 name = seg[1:]
                 if node.param is None:
-                    node.param = empty_node()
+                    node.param = Node()
                     node.param_name = name
                 else:
                     if node.param_name != name:
@@ -73,7 +64,7 @@ class RadixRouter:
                 node = node.param
             else:
                 if seg not in node.static:
-                    node.static[seg] = empty_node()
+                    node.static[seg] = Node()
                 node = node.static[seg]
 
         if node.handler is not None:
@@ -82,33 +73,36 @@ class RadixRouter:
         node.handler = handler
 
     def lookup(self, path: str) -> tuple[Any, dict[str, str]]:
-        if path == "" or path == "/":
+        if not path or path == "/":
             return self.root.handler, {}
 
         segments = self._split(path)
         params: dict[str, str] = {}
+        undo_stack: list[tuple[str, object]] = []
 
         # stack entries:
         # (node, index, undo_len, pending_key, pending_value)
         stack = [(self.root, 0, 0, None, None)]
-        undo_stack: list[tuple[str, object]] = []
 
         while stack:
-            node, i, undo_len, key, value = stack.pop()
+            node, i, undo_len, pending_key, pending_value = stack.pop()
 
-            # rollback
+            # rollback (IMPORTANT: do NOT overwrite pending_key)
             while len(undo_stack) > undo_len:
-                k, old = undo_stack.pop()
-                if old is _UNSET:
-                    del params[k]
+                rb_key, rb_old = undo_stack.pop()
+                if rb_old is _UNSET:
+                    del params[rb_key]
                 else:
-                    params[k] = old
+                    params[rb_key] = rb_old
 
             # apply pending mutation
-            if key is not None:
-                old = params.get(key, _UNSET)
-                undo_stack.append((key, old))
-                params[key] = value
+            if pending_key is not None:
+                if pending_key in params:
+                    old = params[pending_key]
+                    undo_stack.append((pending_key, old))
+                else:
+                    undo_stack.append((pending_key, _UNSET))
+                params[pending_key] = pending_value
 
             # end of path
             if i == len(segments):
@@ -116,23 +110,20 @@ class RadixRouter:
                     return node.handler, dict(params)
 
                 if node.wildcard is not None:
-                    name = node.wildcard_name
-                    stack.append((node.wildcard, len(segments), len(undo_stack), name, ""))
+                    stack.append((node.wildcard, len(segments), len(undo_stack), node.wildcard_name, ""))
                 continue
 
             seg = segments[i]
 
-            # 3 wildcard (lowest priority)
+            # wildcard (lowest priority)
             if node.wildcard is not None:
-                name = node.wildcard_name
-                stack.append((node.wildcard, len(segments), len(undo_stack), name, "/".join(segments[i:])))
-
-            # 2 param
+                stack.append(
+                    (node.wildcard, len(segments), len(undo_stack), node.wildcard_name, "/".join(segments[i:]))
+                )
+            # param
             if node.param is not None:
-                name = node.param_name
-                stack.append((node.param, i + 1, len(undo_stack), name, seg))
-
-            # 1 static (highest priority)
+                stack.append((node.param, i + 1, len(undo_stack), node.param_name, seg))
+            # static (highest priority)
             nxt = node.static.get(seg)
             if nxt is not None:
                 stack.append((nxt, i + 1, len(undo_stack), None, None))
