@@ -1,7 +1,7 @@
 import pytest
 
 # Assuming the RadixRouter is defined in radix_router module
-from c_router import RadixRouter
+from router import RadixRouter
 
 
 # Test 1: Static route insertion and lookup

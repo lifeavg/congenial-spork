@@ -77,8 +77,9 @@ class RadixRouter:
             return self.root.handler, {}
 
         segments = self._split(path)
-        params: dict[str, str] = {}
-        undo_stack: list[tuple[str, object]] = []
+        # params: dict[str, str] = {}
+        # undo_stack: list[tuple[str, object]] = []
+        params_stack: list[tuple[str, str]] = []
 
         # stack entries:
         # (node, index, undo_len, pending_key, pending_value)
@@ -88,29 +89,21 @@ class RadixRouter:
             node, i, undo_len, pending_key, pending_value = stack.pop()
 
             # rollback (IMPORTANT: do NOT overwrite pending_key)
-            while len(undo_stack) > undo_len:
-                rb_key, rb_old = undo_stack.pop()
-                if rb_old is _UNSET:
-                    del params[rb_key]
-                else:
-                    params[rb_key] = rb_old
+            if  len(params_stack) > undo_len:
+                params_stack = params_stack[:undo_len]
 
             # apply pending mutation
             if pending_key is not None:
-                if pending_key in params:
-                    old = params[pending_key]
-                    undo_stack.append((pending_key, old))
-                else:
-                    undo_stack.append((pending_key, _UNSET))
-                params[pending_key] = pending_value
+                params_stack.append((pending_key, pending_value))
+                undo_len += 1
 
             # end of path
             if i == len(segments):
                 if node.handler is not None:
-                    return node.handler, dict(params)
+                    return node.handler, dict(params_stack)
 
                 if node.wildcard is not None:
-                    stack.append((node.wildcard, len(segments), len(undo_stack), node.wildcard_name, ""))
+                    stack.append((node.wildcard, len(segments), undo_len, node.wildcard_name, ""))
                 continue
 
             seg = segments[i]
@@ -118,15 +111,15 @@ class RadixRouter:
             # wildcard (lowest priority)
             if node.wildcard is not None:
                 stack.append(
-                    (node.wildcard, len(segments), len(undo_stack), node.wildcard_name, "/".join(segments[i:]))
+                    (node.wildcard, len(segments), undo_len, node.wildcard_name, "/".join(segments[i:]))
                 )
             # param
             if node.param is not None:
-                stack.append((node.param, i + 1, len(undo_stack), node.param_name, seg))
+                stack.append((node.param, i + 1, undo_len, node.param_name, seg))
             # static (highest priority)
             nxt = node.static.get(seg)
             if nxt is not None:
-                stack.append((nxt, i + 1, len(undo_stack), None, None))
+                stack.append((nxt, i + 1, undo_len, None, None))
 
         return None, {}
 
