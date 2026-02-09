@@ -1,7 +1,7 @@
 import pytest
 from util import handler_factory, middleware_factory
 
-from router import Router
+from src.router import Router
 
 
 def test_mount_multiple_routers():

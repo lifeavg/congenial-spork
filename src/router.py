@@ -1,16 +1,10 @@
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Literal, Optional
 
-HttpMethod = Literal["GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE", "POST", "PATCH", "CONNECT", "__ANY__"]
-HttpRequest = type(object)
-WebsocketRequest = type(object)
-Response = type(object)
-HttpHandler = Callable[[HttpRequest], Awaitable[Response]]
-HttpMiddleware = Callable[[HttpHandler], HttpHandler]
+from .asgi_types import HttpHandler, HttpMethod, HttpMiddleware, WebsocketHandler
+
 HttpHandlerMap = dict[HttpMethod, HttpHandler]
-WebsocketHandler = Callable[[WebsocketRequest], Awaitable[None]]
 ConnectionProtocolType = Literal["http", "ws"]
 
 

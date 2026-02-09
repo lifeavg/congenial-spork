@@ -1,6 +1,6 @@
 from util import handler_factory
 
-from router import Router
+from src.router import Router
 
 
 def test_diamond_branching():

@@ -1,7 +1,7 @@
 import pytest
 from util import handler_factory
 
-from router import Router
+from src.router import Router
 
 
 def test_mount_not_allowed_after():
