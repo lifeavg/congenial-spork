@@ -36,8 +36,65 @@ class Node:
     websocket: Websocket = field(default_factory=Websocket)
 
 
+def _split(path: str) -> list[str]:
+    return [seg for seg in path.strip("/").split("/") if seg]
+
+
+def _merge_nodes(target: Node, source: Node) -> None:
+    """
+    Recursively merge a source node into a target node.
+    """
+    # Merge HTTP handlers
+    target_handlers = {k for k, v in target.http.handlers.items() if v is not None}
+    source_handlers = {k for k, v in source.http.handlers.items() if v is not None}
+    handlers_intersection = target_handlers.intersection(source_handlers)
+    if handlers_intersection:
+        raise ValueError(f"Mount conflict: Multiple HTTP handlers for same path: {' '.join(handlers_intersection)}")
+    target.http.handlers.update(source.http.handlers)
+
+    # Append HTTP middleware (preserving order)
+    target.http.middleware.extend(source.http.middleware)
+
+    # Set WebSocket handler if not already set
+    if source.websocket.handler is not None:
+        if target.websocket.handler is not None:
+            raise ValueError("Mount conflict: Multiple websocket handlers for same path")
+        target.websocket.handler = source.websocket.handler
+
+    # Recursively merge static children
+    for key, source_child in source.static.items():
+        if key in target.static:
+            _merge_nodes(target.static[key], source_child)
+        else:
+            target.static[key] = source_child
+
+    # Merge param node
+    if source.param is not None:
+        if target.param is not None:
+            # Check param name compatibility
+            if target.param_name != source.param_name:
+                raise ValueError(f"Mount conflict: Param name mismatch '{target.param_name}' vs '{source.param_name}'")
+            _merge_nodes(target.param, source.param)
+        else:
+            target.param = source.param
+            target.param_name = source.param_name
+
+    # Merge wildcard node
+    if source.wildcard is not None:
+        if target.wildcard is not None:
+            # Check wildcard name compatibility
+            if target.wildcard_name != source.wildcard_name:
+                raise ValueError(
+                    f"Mount conflict: Wildcard name mismatch '{target.wildcard_name}' vs '{source.wildcard_name}'"
+                )
+            _merge_nodes(target.wildcard, source.wildcard)
+        else:
+            target.wildcard = source.wildcard
+            target.wildcard_name = source.wildcard_name
+
+
 class Router:
-    def __init__(self):
+    def __init__(self) -> None:
         self.root = Node()
 
     def add(
@@ -47,7 +104,7 @@ class Router:
         http_handler: Optional[HttpHandler] = None,
         http_middleware: Optional[HttpMiddleware] = None,
         ws_handler: Optional[WebsocketHandler] = None,
-    ):
+    ) -> None:
         if not path:
             raise ValueError("Empty path")
         if http_method is None:
@@ -66,7 +123,7 @@ class Router:
                 self.root.http.middleware.append(http_middleware)
             return
 
-        segments = self._split(path)
+        segments = _split(path)
         node = self.root
         wildcard_seen = False
 
@@ -115,6 +172,105 @@ class Router:
         if http_middleware is not None:
             node.http.middleware.append(http_middleware)
 
+    def mount(self, at: str, other: Router) -> None:
+        """
+        Mount another router at a specific path prefix.
+
+        Args:
+            at: The path prefix where to mount the other router (e.g., "/api/v1")
+            other: Another Router instance to mount
+        """
+        if not at or at == "/":
+            # If mounting at root, merge all nodes from other router's root
+            # Handle static children
+            for key, child_node in other.root.static.items():
+                if key in self.root.static:
+                    # Merge into existing node
+                    _merge_nodes(self.root.static[key], child_node)
+                else:
+                    # Add new node
+                    self.root.static[key] = child_node
+
+            # Handle param node
+            if other.root.param is not None:
+                if self.root.param is not None:
+                    _merge_nodes(self.root.param, other.root.param)
+                else:
+                    self.root.param = other.root.param
+                    self.root.param_name = other.root.param_name
+
+            # Handle wildcard node
+            if other.root.wildcard is not None:
+                if self.root.wildcard is not None:
+                    _merge_nodes(self.root.wildcard, other.root.wildcard)
+                else:
+                    self.root.wildcard = other.root.wildcard
+                    self.root.wildcard_name = other.root.wildcard_name
+
+            # Merge root-level handlers and middleware
+            self.root.http.handlers.update(other.root.http.handlers)
+            self.root.http.middleware.extend(other.root.http.middleware)
+            if other.root.websocket.handler is not None:
+                if self.root.websocket.handler is not None:
+                    raise ValueError(f"Mount conflict: Both routers have websocket handlers at path {at}")
+                self.root.websocket.handler = other.root.websocket.handler
+
+        else:
+            # Parse the mount path into segments
+            segments = _split(at)
+
+            # Navigate to the mount point
+            current_node = self.root
+            for seg in segments:
+                if seg.startswith("*"):
+                    raise ValueError(f"Cannot mount under wildcard path: {at}")
+
+                if seg.startswith(":"):
+                    # Create parameter node if it doesn't exist
+                    if current_node.param is None:
+                        current_node.param = Node()
+                        current_node.param_name = seg[1:]
+                    current_node = current_node.param
+                else:
+                    # Create static node if it doesn't exist
+                    if seg not in current_node.static:
+                        current_node.static[seg] = Node()
+                    current_node = current_node.static[seg]
+
+            # Now current_node is the mount point - merge other's root into it
+            # Handle static children
+            for key, child_node in other.root.static.items():
+                if key in current_node.static:
+                    # Merge into existing node
+                    _merge_nodes(current_node.static[key], child_node)
+                else:
+                    # Add new node
+                    current_node.static[key] = child_node
+
+            # Handle param node
+            if other.root.param is not None:
+                if current_node.param is not None:
+                    _merge_nodes(current_node.param, other.root.param)
+                else:
+                    current_node.param = other.root.param
+                    current_node.param_name = other.root.param_name
+
+            # Handle wildcard node
+            if other.root.wildcard is not None:
+                if current_node.wildcard is not None:
+                    _merge_nodes(current_node.wildcard, other.root.wildcard)
+                else:
+                    current_node.wildcard = other.root.wildcard
+                    current_node.wildcard_name = other.root.wildcard_name
+
+            # Merge root-level handlers and middleware from other router
+            current_node.http.handlers.update(other.root.http.handlers)
+            current_node.http.middleware.extend(other.root.http.middleware)
+            if other.root.websocket.handler is not None:
+                if current_node.websocket.handler is not None:
+                    raise ValueError(f"Mount conflict: Both routers have websocket handlers at path {at}")
+                current_node.websocket.handler = other.root.websocket.handler
+
     def lookup(
         self, path: str, protocol: ConnectionProtocolType, method: Optional[HttpMethod] = None
     ) -> tuple[Optional[HttpHandler], Optional[WebsocketHandler], dict[str, str]]:
@@ -129,7 +285,7 @@ class Router:
                 return handler, None, {}
             if protocol == "ws":
                 return None, self.root.websocket.handler, {}
-        segments = self._split(path)
+        segments = _split(path)
         mdw_stack = []
         params_stack: list[tuple[str | None, str | None]] = []
 
@@ -184,26 +340,3 @@ class Router:
                 stack.append((nxt, i + 1, undo_len, None, None))
 
         return None, None, {}
-
-    def print_tree(self):
-        def walk(n: Node, prefix: str):
-            if n.handler is not None:
-                print(f"{prefix} [HANDLER]")
-
-            for k, v in n.static.items():
-                print(f"{prefix}/{k}")
-                walk(v, prefix + "/" + k)
-
-            if n.param:
-                print(f"{prefix}/:{n.param_name}")
-                walk(n.param, prefix + "/:" + str(n.param_name))
-
-            if n.wildcard:
-                print(f"{prefix}/*{n.wildcard_name}")
-                walk(n.wildcard, prefix + "/*" + str(n.wildcard_name))
-
-        walk(self.root, "")
-
-    @staticmethod
-    def _split(path: str) -> list[str]:
-        return [seg for seg in path.strip("/").split("/") if seg]
