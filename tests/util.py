@@ -1,4 +1,6 @@
-from src.asgi_types import AsgiApp, HttpMiddleware, Receive, Scope, Send
+from functools import partial
+
+from src.asgi_types import AsgiApp, HttpHandler, HttpMiddleware, Receive, Scope, Send
 
 
 class Connection:
@@ -12,33 +14,27 @@ class Connection:
         self.data += dt
 
 
-class TestHandler:
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+async def handler(scope: Scope, receive: Receive, send: Send) -> None:
+    dt = await receive()
+    await send(dt + " r")
+
+
+async def middleware(handler: HttpHandler, name: str, scope: Scope, receive: Receive, send: Send) -> None:
+
+    async def _receive():
         dt = await receive()
-        await send(dt + " r")
+        if dt:
+            return str(await receive()) + " " + name
+        else:
+            return name
 
-
-class TestMiddleware:
-    def __init__(self, handler: TestHandler, name: str = "mdv") -> None:
-        self.handler = handler
-        self.name = name
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-
-        async def _receive():
-            dt = await receive()
-            if dt:
-                return str(await receive()) + " " + self.name
-            else:
-                return self.name
-
-        await self.handler(scope, _receive, send)
-        await send(" " + self.name)
+    await handler(scope, _receive, send)
+    await send(" " + name)
 
 
 def handler_factory() -> AsgiApp:
-    return TestHandler()
+    return handler
 
 
 def middleware_factory(name: str) -> HttpMiddleware:
-    return lambda x: TestMiddleware(x, name)
+    return lambda x: partial(middleware, x, name)
