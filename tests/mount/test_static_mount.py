@@ -1,5 +1,5 @@
 import pytest
-from util import handler_factory, middleware_factory
+from util import handler_factory, middleware_factory, Connection
 
 from src.router import Router
 
@@ -115,7 +115,9 @@ async def test_mount_with_middleware():
     main_router.mount("/sub", sub_router)
     handler, _, _ = main_router.lookup("/sub/test", "http", "GET")
     assert handler is not None
-    assert await handler("r") == "s r s"
+    c = Connection()
+    await handler({}, c.receive, c.send)
+    assert c.data == "s r s"
 
 
 @pytest.mark.asyncio()
@@ -128,7 +130,9 @@ async def test_mount_middleware_composition():
     main_router.mount("/sub", sub_router)
     handler, _, _ = main_router.lookup("/sub/test", "http", "GET")
     assert handler is not None
-    assert await handler("r") == "mn sub r sub mn"
+    c = Connection()
+    await handler({}, c.receive, c.send)
+    assert c.data == "mn sub r sub mn"
 
 
 def test_mount_conflict_detection():

@@ -1,5 +1,5 @@
 import pytest
-from util import handler_factory, middleware_factory
+from util import Connection, handler_factory, middleware_factory
 
 from src.router import Router
 
@@ -130,4 +130,6 @@ async def test_mount_with_middleware_hierarchy():
 
     # Get handler and check middleware application
     handler, _, _ = main_router.lookup("/api/test/user", "http", "GET")
-    assert (await handler("dt")) == "rt ts hh dt hh ts rt"
+    c = Connection()
+    await handler({}, c.receive, c.send)
+    assert c.data == "rt ts hh r hh ts rt"

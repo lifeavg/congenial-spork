@@ -1,5 +1,5 @@
 import pytest
-from util import handler_factory, middleware_factory
+from util import handler_factory, middleware_factory, Connection
 
 from src.router import Router
 
@@ -33,21 +33,25 @@ def test_ws_insertion_and_lookup():
 @pytest.mark.asyncio()
 async def test_http_middleware_insertion_and_lookup():
     router = Router()
-    router.add("/", None, handler_factory(), middleware_factory(1), None)
+    router.add("/", None, handler_factory(), middleware_factory("1"), None)
     handler, _, _ = router.lookup("/", "http")
     assert handler is not None
-    assert await handler("r") == "1 r 1"
+    c = Connection()
+    await handler({}, c.receive, c.send)
+    assert c.data == "1 r 1"
 
 
 @pytest.mark.asyncio()
 async def test_http_multi_middleware_insertion_and_lookup():
     router = Router()
-    router.add("/", None, None, middleware_factory(0), None)
-    router.add("/", None, handler_factory(), middleware_factory(1), None)
-    router.add("/", None, None, middleware_factory(2), None)
+    router.add("/", None, None, middleware_factory("0"), None)
+    router.add("/", None, handler_factory(), middleware_factory("1"), None)
+    router.add("/", None, None, middleware_factory("2"), None)
     handler, _, _ = router.lookup("/", "http")
     assert handler is not None
-    assert await handler("r") == "2 1 0 r 0 1 2"
+    c = Connection()
+    await handler({}, c.receive, c.send)
+    assert c.data == "2 1 0 r 0 1 2"
 
 
 def test_http_middleware_without_handler_insertion_and_lookup():
