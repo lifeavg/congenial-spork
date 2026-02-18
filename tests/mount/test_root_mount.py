@@ -1,12 +1,9 @@
-import pytest
-from util import handler_factory, middleware_factory, Connection
-
-from src.router import Router
+from util import handler_factory, middleware_factory, new_router
 
 
 def test_mount():
-    main_router = Router()
-    sub_router = Router()
+    main_router = new_router()
+    sub_router = new_router()
     users_handler = handler_factory()
     products_handler = handler_factory()
     sub_router.add("/users", "GET", users_handler, None, None)
@@ -17,8 +14,8 @@ def test_mount():
 
 
 def test_mount_websocket():
-    main_router = Router()
-    sub_router = Router()
+    main_router = new_router()
+    sub_router = new_router()
     ws_handler = handler_factory()
     sub_router.add("/users", None, None, None, ws_handler)
     main_router.mount("/", sub_router)
@@ -26,8 +23,8 @@ def test_mount_websocket():
 
 
 def test_mount_parameter():
-    main_router = Router()
-    sub_router = Router()
+    main_router = new_router()
+    sub_router = new_router()
     users_handler = handler_factory()
     sub_router.add("/:id", "GET", users_handler, None, None)
     main_router.mount("/", sub_router)
@@ -35,8 +32,8 @@ def test_mount_parameter():
 
 
 def test_mount_path():
-    main_router = Router()
-    sub_router = Router()
+    main_router = new_router()
+    sub_router = new_router()
     users_handler = handler_factory()
     sub_router.add("/*path", "GET", users_handler, None, None)
     main_router.mount("/", sub_router)
@@ -44,8 +41,8 @@ def test_mount_path():
 
 
 def test_non_empty_mount_parameter():
-    main_router = Router()
-    sub_router = Router()
+    main_router = new_router()
+    sub_router = new_router()
     users_handler = handler_factory()
     another_handler = handler_factory()
     main_router.add("/another", "GET", another_handler, None, None)
@@ -56,8 +53,8 @@ def test_non_empty_mount_parameter():
 
 
 def test_non_empty_mount_path():
-    main_router = Router()
-    sub_router = Router()
+    main_router = new_router()
+    sub_router = new_router()
     users_handler = handler_factory()
     another_handler = handler_factory()
     main_router.add("/another", "GET", another_handler, None, None)
@@ -67,30 +64,24 @@ def test_non_empty_mount_path():
     assert main_router.lookup("/another", "http", "GET") == (another_handler, None, {})
 
 
-@pytest.mark.asyncio()
-async def test_mount_with_middleware():
-    main_router = Router()
-    sub_router = Router()
+def test_mount_with_middleware():
+    main_router = new_router()
+    sub_router = new_router()
     sub_handler = handler_factory()
     sub_router.add("/test", "GET", sub_handler, middleware_factory("sub"), None)
     main_router.mount("/", sub_router)
     handler, _, _ = main_router.lookup("/test", "http", "GET")
     assert handler is not None
-    c = Connection()
-    await handler({}, c.receive, c.send)
-    assert c.data == "sub r sub"
+    assert handler("r") == "sub r sub"
 
 
-@pytest.mark.asyncio()
-async def test_mount_middleware_composition():
-    main_router = Router()
-    sub_router = Router()
+def test_mount_middleware_composition():
+    main_router = new_router()
+    sub_router = new_router()
     main_router.add("/", None, None, middleware_factory("mn"), None)
     sub_handler = handler_factory()
     sub_router.add("/test", "GET", sub_handler, middleware_factory("sub"), None)
     main_router.mount("/", sub_router)
     handler, _, _ = main_router.lookup("/test", "http", "GET")
     assert handler is not None
-    c = Connection()
-    await handler({}, c.receive, c.send)
-    assert c.data == "mn sub r sub mn"
+    assert handler("r") == "mn sub r sub mn"

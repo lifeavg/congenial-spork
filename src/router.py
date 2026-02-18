@@ -1,59 +1,52 @@
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
 from itertools import chain
-from typing import Literal, Optional
+from typing import Literal, Optional, Self, cast
 
-from .asgi_types import HttpHandler, HttpMethod, HttpMiddleware, WebsocketHandler
+from .util import chain_decorators
 
-HttpHandlerMap = dict[HttpMethod, HttpHandler]
-ConnectionProtocolType = Literal["http", "ws"]
-
-
-@dataclass(slots=True)
-class Http:
-    handlers: HttpHandlerMap = field(default_factory=dict)
-    middleware: list[HttpMiddleware] = field(default_factory=list)
+type HttpHandlerMap[Y: Hashable, T] = dict[Y, T]
+type ConnectionProtocolType = Literal["http", "ws"]
 
 
 @dataclass(slots=True)
-class Websocket:
-    handler: Optional[WebsocketHandler] = None
-
-
-@dataclass(slots=True)
-class Node:
-    static: dict[str, "Node"] = field(default_factory=dict)
-    param: Optional["Node"] = None
+class Node[T, W]:
+    static: dict[str, "Node[T, W]"] = cast(dict[str, "Node[T, W]"], field(default_factory=dict))
+    param: Optional["Node[T, W]"] = None
     param_name: Optional[str] = None
-    wildcard: Optional["Node"] = None
+    wildcard: Optional["Node[T, W]"] = None
     wildcard_name: Optional[str] = None
-    http: Http = field(default_factory=Http)
-    websocket: Websocket = field(default_factory=Websocket)
+    http: HttpHandlerMap[Hashable, T] = cast(HttpHandlerMap[Hashable, T], field(default_factory=dict))
+    websocket: Optional[W] = None
+    middleware: list[Callable[[T], T]] = cast(list[Callable[[T], T]], field(default_factory=list))
 
 
 def _split(path: str) -> list[str]:
     return [seg for seg in path.strip("/").split("/") if seg]
 
 
-def _merge_nodes(target: Node, source: Node) -> None:
+def _merge_nodes[T, W](target: Node[T, W], source: Node[T, W]) -> None:
     """
     Recursively merge a source node into a target node.
     """
     # Merge HTTP handlers
-    target_handlers = {k for k, v in target.http.handlers.items() if v is not None}
-    source_handlers = {k for k, v in source.http.handlers.items() if v is not None}
+    target_handlers = {k for k, v in target.http.items() if v is not None}
+    source_handlers = {k for k, v in source.http.items() if v is not None}
     handlers_intersection = target_handlers.intersection(source_handlers)
     if handlers_intersection:
-        raise ValueError(f"Mount conflict: Multiple HTTP handlers for same path: {' '.join(handlers_intersection)}")
-    target.http.handlers.update(source.http.handlers)
+        raise ValueError(
+            f"Mount conflict: Multiple HTTP handlers for same path: {' '.join([str(i) for i in handlers_intersection])}"
+        )
+    target.http.update(source.http)
 
     # Append HTTP middleware (preserving order)
-    target.http.middleware.extend(source.http.middleware)
+    target.middleware.extend(source.middleware)
 
     # Set WebSocket handler if not already set
-    if source.websocket.handler is not None:
-        if target.websocket.handler is not None:
+    if source.websocket is not None:
+        if target.websocket is not None:
             raise ValueError("Mount conflict: Multiple websocket handlers for same path")
-        target.websocket.handler = source.websocket.handler
+        target.websocket = source.websocket
 
     # Recursively merge static children
     for key, source_child in source.static.items():
@@ -87,34 +80,32 @@ def _merge_nodes(target: Node, source: Node) -> None:
             target.wildcard_name = source.wildcard_name
 
 
-class Router:
+class Router[T, W]:
     def __init__(self) -> None:
-        self.root = Node()
+        self.root = Node[T, W]()
 
     def add(
         self,
         path: str,
-        http_method: Optional[HttpMethod] = None,
-        http_handler: Optional[HttpHandler] = None,
-        http_middleware: Optional[HttpMiddleware] = None,
-        ws_handler: Optional[WebsocketHandler] = None,
+        http_method: Hashable = None,
+        http_handler: T | None = None,
+        middleware: Callable[[T], T] | None = None,
+        ws_handler: W | None = None,
     ) -> None:
         if not path:
             raise ValueError("Empty path")
-        if http_method is None:
-            http_method = "__ANY__"
 
         if path == "/":
-            if http_handler is not None and self.root.http.handlers.get(http_method) is not None:
+            if http_handler is not None and self.root.http.get(http_method) is not None:
                 raise ValueError("Duplicate http route: /")
-            if ws_handler is not None and self.root.websocket.handler is not None:
+            if ws_handler is not None and self.root.websocket is not None:
                 raise ValueError("Duplicate websocket route: /")
             if http_handler is not None:
-                self.root.http.handlers[http_method] = http_handler
+                self.root.http[http_method] = http_handler
             if ws_handler is not None:
-                self.root.websocket.handler = ws_handler
-            if http_middleware is not None:
-                self.root.http.middleware.append(http_middleware)
+                self.root.websocket = ws_handler
+            if middleware is not None:
+                self.root.middleware.append(middleware)
             return
 
         segments = _split(path)
@@ -155,18 +146,18 @@ class Router:
                     node.static[seg] = Node()
                 node = node.static[seg]
 
-        if http_handler is not None and node.http.handlers.get(http_method) is not None:
+        if http_handler is not None and node.http.get(http_method) is not None:
             raise ValueError(f"Duplicate http route: {path}")
-        if ws_handler is not None and node.websocket.handler is not None:
+        if ws_handler is not None and node.websocket is not None:
             raise ValueError(f"Duplicate websocket route: {path}")
         if http_handler is not None:
-            node.http.handlers[http_method] = http_handler
+            node.http[http_method] = http_handler
         if ws_handler is not None:
-            node.websocket.handler = ws_handler
-        if http_middleware is not None:
-            node.http.middleware.append(http_middleware)
+            node.websocket = ws_handler
+        if middleware is not None:
+            node.middleware.append(middleware)
 
-    def mount(self, at: str, other: Router) -> None:
+    def mount(self, at: str, other: Self) -> None:
         """
         Mount another router at a specific path prefix.
 
@@ -202,12 +193,12 @@ class Router:
                     self.root.wildcard_name = other.root.wildcard_name
 
             # Merge root-level handlers and middleware
-            self.root.http.handlers.update(other.root.http.handlers)
-            self.root.http.middleware.extend(other.root.http.middleware)
-            if other.root.websocket.handler is not None:
-                if self.root.websocket.handler is not None:
+            self.root.http.update(other.root.http)
+            self.root.middleware.extend(other.root.middleware)
+            if other.root.websocket is not None:
+                if self.root.websocket is not None:
                     raise ValueError(f"Mount conflict: Both routers have websocket handlers at path {at}")
-                self.root.websocket.handler = other.root.websocket.handler
+                self.root.websocket = other.root.websocket
 
         else:
             # Parse the mount path into segments
@@ -258,34 +249,28 @@ class Router:
                     current_node.wildcard_name = other.root.wildcard_name
 
             # Merge root-level handlers and middleware from other router
-            current_node.http.handlers.update(other.root.http.handlers)
-            current_node.http.middleware.extend(other.root.http.middleware)
-            if other.root.websocket.handler is not None:
-                if current_node.websocket.handler is not None:
+            current_node.http.update(other.root.http)
+            current_node.middleware.extend(other.root.middleware)
+            if other.root.websocket is not None:
+                if current_node.websocket is not None:
                     raise ValueError(f"Mount conflict: Both routers have websocket handlers at path {at}")
-                current_node.websocket.handler = other.root.websocket.handler
+                current_node.websocket = other.root.websocket
 
     def lookup(
-        self, path: str, protocol: ConnectionProtocolType, method: Optional[HttpMethod] = None
-    ) -> tuple[Optional[HttpHandler], Optional[WebsocketHandler], dict[str, str]]:
-        if method is None:
-            method = "__ANY__"
+        self, path: str, protocol: ConnectionProtocolType, method: Hashable = None
+    ) -> tuple[Optional[T], Optional[W], Callable[[T], T], dict[str, str]]:
         if not path or path == "/":
             if protocol == "http":
-                handler = self.root.http.handlers.get(method)
-                if handler is not None:
-                    for mv in self.root.http.middleware:
-                        handler = mv(handler)
-                return handler, None, {}
+                return self.root.http.get(method), None, chain_decorators(self.root.middleware), {}
             if protocol == "ws":
-                return None, self.root.websocket.handler, {}
+                return None, self.root.websocket, chain_decorators(self.root.middleware), {}
         segments = _split(path)
-        mdw_stack = []
+        mdw_stack: list[list[Callable[[T], T]]] = []
         params_stack: list[tuple[str | None, str | None]] = []
 
         # stack entries:
         # (node, index, undo_len, pending_key, pending_value)
-        stack = [(self.root, 0, 0, None, None)]
+        stack: list[tuple[Node[T, W], int, int, str | None, str | None]] = [(self.root, 0, 0, None, None)]
 
         while stack:
             node, i, undo_len, pending_key, pending_value = stack.pop()
@@ -296,26 +281,34 @@ class Router:
 
             # apply pending mutation
             params_stack.append((pending_key, pending_value))
-            mdw_stack.append(node.http.middleware if protocol == "http" else [])
+            mdw_stack.append(node.middleware if protocol == "http" else [])
             undo_len += 1
 
             # end of path
             if i == len(segments):
                 if protocol == "http":
-                    handler = node.http.handlers.get(method)
+                    handler = node.http.get(method)
                     if handler is not None:
-                        for mv in chain(*reversed(mdw_stack)):
-                            handler = mv(handler)
                         params = dict(params_stack)
                         if None in params:
                             del params[None]
-                        return handler, None, params
+                        return (
+                            handler,
+                            None,
+                            chain_decorators(chain(*reversed(mdw_stack))),
+                            cast(dict[str, str], params),
+                        )
                 elif protocol == "ws":
-                    if node.websocket.handler is not None:
+                    if node.websocket is not None:
                         params = dict(params_stack)
                         if None in params:
                             del params[None]
-                        return None, node.websocket.handler, params
+                        return (
+                            None,
+                            node.websocket,
+                            chain_decorators(chain(*reversed(mdw_stack))),
+                            cast(dict[str, str], params),
+                        )
                 if node.wildcard is not None:
                     stack.append((node.wildcard, len(segments), undo_len, node.wildcard_name, ""))
                 continue
@@ -333,4 +326,4 @@ class Router:
             if nxt is not None:
                 stack.append((nxt, i + 1, undo_len, None, None))
 
-        return None, None, {}
+        return None, None, lambda x: x, {}

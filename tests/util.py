@@ -1,40 +1,45 @@
-from functools import partial
+from collections.abc import Callable, Hashable
+from typing import override
 
-from src.asgi_types import AsgiApp, HttpHandler, HttpMiddleware, Receive, Scope, Send
-
-
-class Connection:
-    def __init__(self) -> None:
-        self.data = ""
-
-    async def receive(self):
-        return ""
-
-    async def send(self, dt):
-        self.data += dt
+from src.router import ConnectionProtocolType, Router
 
 
-async def handler(scope: Scope, receive: Receive, send: Send) -> None:
-    dt = await receive()
-    await send(dt + " r")
+class TestRouter[T, W](Router):
+    @override
+    def lookup(  # type: ignore
+        self, path: str, protocol: ConnectionProtocolType, method: Hashable = None
+    ) -> tuple[T | None, W | None, dict[str, str]]:  # type: ignore
+        http, ws, mv, p = super().lookup(path, protocol, method)
+        if http is not None:
+            return mv(http), ws, p
+        return http, ws, p
 
 
-async def middleware(handler: HttpHandler, name: str, scope: Scope, receive: Receive, send: Send) -> None:
-
-    async def _receive():
-        dt = await receive()
-        if dt:
-            return str(await receive()) + " " + name
-        else:
-            return name
-
-    await handler(scope, _receive, send)
-    await send(" " + name)
+type Handler = Callable[[str], str]
+type Middleware = Callable[[Handler], Handler]
 
 
-def handler_factory() -> AsgiApp:
+def handler(s: str) -> str:
+    return s
+
+
+def middleware(handler: Handler, name: str) -> Handler:
+    def wrapped(s: str) -> str:
+        return f"{name} {handler(s)} {name}"
+
+    return wrapped
+
+
+def handler_factory():
     return handler
 
 
-def middleware_factory(name: str) -> HttpMiddleware:
-    return lambda x: partial(middleware, x, name)
+def middleware_factory(name: str) -> Middleware:
+    def wrapped(handler: Handler) -> Handler:
+        return middleware(handler, name)
+
+    return wrapped
+
+
+def new_router():
+    return TestRouter[Handler, Handler]()

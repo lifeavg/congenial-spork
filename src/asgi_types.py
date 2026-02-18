@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Any, Literal, NotRequired, Optional, TypedDict
 
 ScopeType = Literal["lifespan", "http", "websocket"]
@@ -20,9 +20,9 @@ EventType = Literal[
     "websocket.disconnect",
 ]
 HttpVersion = Literal["1.0", "1.1", "2"]
-HttpMethod = Literal["GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE", "POST", "PATCH", "CONNECT", "__ANY__"]
+HttpMethod = Literal["GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE", "POST", "PATCH", "CONNECT"]
 HttpScheme = Literal["http", "https"]
-HttpHeaders = Iterable[Iterable[bytes]]
+HttpHeaders = Iterable[Sequence[bytes]]
 
 
 class AsgiInfo(TypedDict):
@@ -173,7 +173,7 @@ class LifespanShutdownFailed(TypedDict):
     message: NotRequired[str]
 
 
-HttpReceiveEvent = HttpRequest | HttpDisconnect
+type HttpReceiveEvent = HttpRequest | HttpDisconnect
 WebsocketReceiveEvent = WebsocketConnect | WebsocketReceive | WebsocketDisconnect
 LifespanReceiveEvent = LifespanStartup | LifespanShutdown
 
@@ -181,11 +181,11 @@ HttpSendEvent = HttpResponseStart | HttpResponseBody
 WebsocketSendEvent = WebsocketAccept | WebsocketSend | WebsocketClose
 LifespanSendEvent = LifespanStartupComplete | LifespanStartupFailed | LifespanShutdownComplete | LifespanShutdownFailed
 
-HttpReceiveCallable = Callable[[], Awaitable[HttpReceiveEvent]]
+type HttpReceiveCallable = Callable[[], Awaitable[HttpReceiveEvent]]
 WebsocketReceiveCallable = Callable[[], Awaitable[WebsocketReceiveEvent]]
 LifespanReceiveCallable = Callable[[], Awaitable[LifespanSendEvent]]
 
-HttpSendCallable = Callable[[HttpSendEvent], Awaitable[None]]
+type HttpSendCallable = Callable[[HttpSendEvent], Awaitable[None]]
 WebsocketSendCallable = Callable[[WebsocketSendEvent], Awaitable[None]]
 LifespanSendCallable = Callable[[LifespanSendEvent], Awaitable[None]]
 

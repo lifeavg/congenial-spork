@@ -1,13 +1,11 @@
-from util import handler_factory
-
-from src.router import Router
+from util import handler_factory, new_router
 
 
 def test_diamond_branching():
     h_static = handler_factory()
     h_param = handler_factory()
     h_wildcard = handler_factory()
-    router = Router()
+    router = new_router()
     router.add("/x/static/end", "GET", h_static, None, None)
     router.add("/x/:id/end", "GET", h_param, None, None)
     router.add("/x/*rest", "GET", h_wildcard, None, None)
@@ -20,7 +18,7 @@ def test_nested_wildcard_forks():
     h_static_wildcard = handler_factory()
     h_param_static = handler_factory()
     h_param_wildcard = handler_factory()
-    router = Router()
+    router = new_router()
     router.add("/a/b/*rest", "GET", h_static_wildcard, None, None)
     router.add("/a/:id/c/*rest", "GET", h_param_static, None, None)
     router.add("/a/:id/*rest", "GET", h_param_wildcard, None, None)

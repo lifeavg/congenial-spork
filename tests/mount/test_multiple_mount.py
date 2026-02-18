@@ -1,13 +1,10 @@
-import pytest
-from util import Connection, handler_factory, middleware_factory
-
-from src.router import Router
+from util import handler_factory, middleware_factory, new_router
 
 
 def test_mount_multiple_routers():
-    main_router = Router()
-    users_router = Router()
-    posts_router = Router()
+    main_router = new_router()
+    users_router = new_router()
+    posts_router = new_router()
 
     # Create handlers
     users_handler = handler_factory()
@@ -39,18 +36,18 @@ def test_mount_multiple_routers():
 
 def test_mount_preserves_precedence():
     """Test that route precedence is maintained after mounting."""
-    main_router = Router()
+    main_router = new_router()
 
     # Create sub-routes
-    static_router = Router()
+    static_router = new_router()
     static_handler = handler_factory()
     static_router.add("/specific", "GET", static_handler, None, None)
 
-    param_router = Router()
+    param_router = new_router()
     param_handler = handler_factory()
     param_router.add("/:id", "POST", param_handler, None, None)
 
-    wildcard_router = Router()
+    wildcard_router = new_router()
     wildcard_handler = handler_factory()
     wildcard_router.add("/*path", "PUT", wildcard_handler, None, None)
 
@@ -74,19 +71,19 @@ def test_mount_preserves_precedence():
 
 
 def test_mount_merge_handlers():
-    main_router = Router()
+    main_router = new_router()
     get_handler = handler_factory()
     main_router.add("/api/data", "GET", get_handler, None, None)
 
-    post_router = Router()
+    post_router = new_router()
     post_handler = handler_factory()
     post_router.add("/data", "POST", post_handler, None, None)
 
-    put_router = Router()
+    put_router = new_router()
     put_handler = handler_factory()
     put_router.add("/api/data", "PUT", put_handler, None, None)
 
-    ws_router = Router()
+    ws_router = new_router()
     ws_handler = handler_factory()
     ws_router.add("/data", None, None, None, ws_handler)
 
@@ -109,19 +106,18 @@ def test_mount_merge_handlers():
     assert handler == ws_handler
 
 
-@pytest.mark.asyncio
-async def test_mount_with_middleware_hierarchy():
+def test_mount_with_middleware_hierarchy():
     """Test mounting maintains middleware hierarchy properly."""
-    main_router = Router()
+    main_router = new_router()
 
     # Add middleware to main router at mount point
     main_router.add("/", None, None, middleware_factory("rt"), None)
 
     # Add route with middleware to sub-router
-    sub_router = Router()
+    sub_router = new_router()
     sub_router.add("/test", None, None, middleware_factory("ts"), None)
 
-    handler_router = Router()
+    handler_router = new_router()
     handler_router.add("/test/user", "GET", handler_factory(), middleware_factory("hh"), None)
 
     # Mount sub-router
@@ -130,6 +126,5 @@ async def test_mount_with_middleware_hierarchy():
 
     # Get handler and check middleware application
     handler, _, _ = main_router.lookup("/api/test/user", "http", "GET")
-    c = Connection()
-    await handler({}, c.receive, c.send)
-    assert c.data == "rt ts hh r hh ts rt"
+    assert handler is not None
+    assert handler("r") == "rt ts hh r hh ts rt"
