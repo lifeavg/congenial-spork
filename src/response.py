@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from typing import Callable
+from typing import AsyncGenerator, Callable
 
 from .asgi_types import HttpSendCallable, HttpSendEvent
 from .headers import HeadersImmutable, HeadersMutable
@@ -63,11 +63,11 @@ class Response:
         except (OSError, RuntimeError) as e:
             raise ResponseException("Connection closed") from e
 
-
-@asynccontextmanager
-async def response(send: HttpSendCallable, disconnected: DisconnectFlag):
-    response = Response(send, disconnected)
-    try:
-        yield response
-    finally:
-        await response.close()
+    @classmethod
+    @asynccontextmanager
+    async def start(cls, send: HttpSendCallable, disconnected: DisconnectFlag) -> AsyncGenerator[Response, None]:
+        response = Response(send, disconnected)
+        try:
+            yield response
+        finally:
+            await response.close()
