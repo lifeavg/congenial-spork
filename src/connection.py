@@ -8,10 +8,9 @@ class HttpConnection:
         self._input_streamer = input_streamer
 
     async def __call__(self, scope: HttpScope, receive: HttpReceiveCallable, send: HttpSendCallable) -> None:
-        stream: StreamReceive
         async with self._input_streamer.listen(receive) as stream:
             chunks: list[bytes] = []
-            while chunk := await stream.get():
+            async for chunk in stream:
                 chunks.append(chunk)
             body = b"".join(chunks)
             async with response(send, stream.is_connected) as resp:

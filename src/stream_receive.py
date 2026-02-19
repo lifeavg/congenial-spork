@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from typing import Literal, Protocol, Self, override
 
@@ -12,9 +12,11 @@ class StreamReceive(Protocol):
     def is_connected(self) -> bool: ...
     async def wait_disconnect(self) -> Literal[True]: ...
     @classmethod
-    @asynccontextmanager  # type: ignore
-    async def listen(cls, receive: HttpReceiveCallable) -> AsyncGenerator[Self, None]: ...
+    @asynccontextmanager
+    async def listen(cls, receive: HttpReceiveCallable) -> AsyncGenerator[Self, None]:
+        yield cls()
 
+    def __aiter__(self) -> AsyncIterator[bytes]: ...
 
 class _StreamReceiveBase:
     def __init__(self) -> None:
@@ -64,6 +66,15 @@ class _StreamReceiveBase:
 
     async def _receive(self) -> bytes | None:
         raise NotImplementedError()
+
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> bytes:
+        chunk = await self._receive()
+        if chunk is None:
+            raise StopAsyncIteration()
+        return chunk
 
 
 class StreamReceiveQueued(_StreamReceiveBase):
